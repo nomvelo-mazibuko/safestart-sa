@@ -221,3 +221,10 @@ HELP_LINKS = [
     ("Legal Aid South Africa", "Free legal help if you cannot afford a lawyer.", "https://legal-aid.co.za"),
     ("SAYouth.mobi", "Free support for young job seekers. Call 0800 727272.", "https://sayouth.mobi"),
 ]
+
+SOURCES = [
+    "Department of Employment and Labour (labour.gov.za): Basic Conditions of Employment Act, National Minimum Wage Act, Unemployment Insurance Act, Employment Equity Act and related guides.",
+    "Commission for Conciliation, Mediation and Arbitration (ccma.org.za): dismissal and unfair labour practice referrals and time limits.",
+    "Constitutional Court, Van Wyk v Minister of Employment and Labour (October 2025): shared parental leave.",
+    "Always check the Department of Employment and Labour for the latest amounts, because they change.",
+]

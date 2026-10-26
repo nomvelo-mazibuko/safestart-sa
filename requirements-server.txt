@@ -1,2 +1,2 @@
-flet>=1.0
-flet-web>=1.0
+flet==1.0.5
+flet-web==1.0.5

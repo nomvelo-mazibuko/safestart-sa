@@ -12,21 +12,27 @@ Each finding is a small dictionary: {"level": "bad", "text": "...", "points": 30
 Only the Python standard library is used, so there is nothing extra to install.
 No automatic check can PROVE a job is real or fake. These are warning signs only.
 """
+import http.client
 import ipaddress
 import json
 import re
 import socket
+import ssl
 from datetime import datetime, timezone
 from html import unescape
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import (HTTPHandler, HTTPRedirectHandler, HTTPSHandler, ProxyHandler,
+                            Request, build_opener)
 
 # Tests set this to True. Keep it False so users cannot make the app open
 # addresses on their own network.
 ALLOW_PRIVATE = False
 TIMEOUT = 8  # seconds to wait for a website
 MAX_BYTES = 600000  # never download more than this from one page
+MAX_LINK_CHARS = 2000  # refuse absurdly long links
+ALLOWED_PORTS = (None, 80, 443)  # only normal web ports; stops probing other services
+SSL_CONTEXT = ssl.create_default_context()  # checks website certificates (tests may replace it)
 
 # ---------- Lists the checks use ----------
 # Domains ending like this have the real name in the LAST THREE parts (shoprite.co.za).
@@ -122,6 +128,50 @@ def title_matches(job_title, page_text):
 
 
 # ---------- Opening websites safely ----------
+def resolve_public_ip(host):
+    """Look up a website's address and make sure it is a PUBLIC one.
+    Returns the address as text. Raises PermissionError for private addresses."""
+    addresses = []
+    for info in socket.getaddrinfo(host, None):
+        addresses.append(info[4][0])
+    if len(addresses) == 0:
+        raise socket.gaierror("no address found")
+    if not ALLOW_PRIVATE:
+        for address in addresses:
+            ip = ipaddress.ip_address(address)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+                raise PermissionError("private address")
+    return addresses[0]
+
+
+class SafeHTTPConnection(http.client.HTTPConnection):
+    """Connects to the exact address we checked, so the address cannot be swapped
+    for a private one after the check (a trick called DNS rebinding)."""
+
+    def connect(self):
+        ip = resolve_public_ip(self.host)
+        self.sock = socket.create_connection((ip, self.port), self.timeout)
+
+
+class SafeHTTPSConnection(http.client.HTTPSConnection):
+    """The same idea for https. The certificate is still checked against the website name."""
+
+    def connect(self):
+        ip = resolve_public_ip(self.host)
+        plain_socket = socket.create_connection((ip, self.port), self.timeout)
+        self.sock = self._context.wrap_socket(plain_socket, server_hostname=self.host)
+
+
+class SafeHTTPHandler(HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(SafeHTTPConnection, req)
+
+
+class SafeHTTPSHandler(HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(SafeHTTPSConnection, req, context=SSL_CONTEXT)
+
+
 class NoRedirect(HTTPRedirectHandler):
     """Stops Python following redirects automatically.
     We follow them ourselves in fetch() so we can check every address."""
@@ -130,26 +180,21 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-opener = build_opener(NoRedirect)
-
-
-def check_address_is_public(host):
-    """Refuse addresses that belong to a private network (for safety)."""
-    if ALLOW_PRIVATE:
-        return
-    for info in socket.getaddrinfo(host, None):
-        ip = ipaddress.ip_address(info[4][0])
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-            raise PermissionError("private address")
+# ProxyHandler({}) means "do not use a proxy", so our safety checks cannot be bypassed.
+opener = build_opener(ProxyHandler({}), NoRedirect, SafeHTTPHandler, SafeHTTPSHandler)
 
 
 def fetch(url):
     """Open a web page. Returns (final_url, page_html). Raises an error if it fails."""
+    if len(url) > MAX_LINK_CHARS:
+        raise ValueError("link too long")
     for attempt in range(5):  # follow at most 5 redirects
         parts = urlparse(url)
         if parts.scheme not in ("http", "https") or not parts.hostname:
             raise ValueError("not a web link")
-        check_address_is_public(parts.hostname)
+        if parts.port not in ALLOWED_PORTS and not ALLOW_PRIVATE:
+            raise ValueError("unusual port")
+        resolve_public_ip(parts.hostname)  # early, clear error for private addresses
 
         request = Request(url, headers={"User-Agent": "Mozilla/5.0 (SafeStartSA link checker)"})
         try:
@@ -251,7 +296,9 @@ def check_job_link(url, company_site, result, patterns):
         return
     except (URLError, socket.gaierror, TimeoutError, ValueError) as error:
         reason = str(getattr(error, "reason", error))
-        if "CERTIFICATE" in reason.upper():
+        if isinstance(getattr(error, "reason", None), PermissionError):
+            add_finding(result, "bad", "That link points to a private address and was not opened.", 30)
+        elif "CERTIFICATE" in reason.upper():
             add_finding(result, "bad", "The site's security certificate is invalid. Do not enter any details.", 25)
         else:
             add_finding(result, "bad", "Could not open this link. The site may not exist, or your internet may be off.", 15)
@@ -366,6 +413,11 @@ def verify(job_url, company_site="", job_title="", patterns=None):
     result = {"findings": [], "score": 0, "page_text": "", "matches": []}
     job_url = normalize_url(job_url)
     company_site = normalize_url(company_site)
+
+    if len(job_url) > MAX_LINK_CHARS or len(company_site) > MAX_LINK_CHARS:
+        add_finding(result, "warn", "That link is far too long to be a normal web address, so it was not opened.", 15)
+        result["score"] = calculate_score(result["findings"])
+        return result
 
     if job_url != "":
         check_job_link(job_url, company_site, result, patterns)

@@ -1,12 +1,14 @@
 """SafeStart SA - a free work-readiness app for South African youth.
 
 Screens
-  1. Home          - three big buttons
-  2. Scam checker  - paste an ad, check the link, tick red flags, get a risk rating
-  3. Rights        - labour law lessons (the text lives in rights_content.py)
-  4. Skills        - email writing tips and a 30-second typing test
+  1. Home          - big buttons, privacy note and feedback
+  2. Scam checker  - paste an ad, check the link, tick red flags, get a risk rating,
+                     share a warning, see scam examples and what to do if scammed
+  3. Rights        - labour law lessons (the text lives in rights_content.py) + pay calculator
+  4. Tools         - payslip checker, contract checker and rights quiz (see tools.py)
+  5. Skills        - email tips, typing test, CV tips and interview practice
 
-Run on your computer:   flet run main.py
+Run on your computer:   python main.py          (or: flet run main.py)
 Run in the browser:     flet run --web main.py
 """
 import asyncio
@@ -14,21 +16,22 @@ import os
 import random
 import re
 import sys
+from urllib.parse import quote
 
 import flet as ft
 
+import ratelimit
 import rights_content
+import scam_content
+import settings
+import skills_content
 import verifier
+from tools import tools_view
+from ui import (AMBER, BACKGROUND, GREEN, INK, MUTED, RED, TEAL, make_card, make_heading,
+                make_help_row, make_section_title, make_text)
 
-# ---------- Colours ----------
-TEAL = "#0F4C5C"
-INK = "#1B2A30"
-MUTED = "#5B6B71"
-BACKGROUND = "#F2F6F7"
-WHITE = "#FFFFFF"
-RED = "#B3261E"
-AMBER = "#B26A00"
-GREEN = "#2E7D32"
+MAX_AD_CHARS = 5000
+MAX_LINK_CHARS = 2000
 
 # ---------- Scam checker data ----------
 # Each red flag has: a key, the question shown to the user, how many risk points
@@ -64,7 +67,7 @@ ADVICE_HIGH = [
     "Do not pay anything and do not send ID, bank details or OTPs.",
     "Registered private employment agencies may not charge job seekers fees.",
     "Stop contact and tell a friend or family member what happened.",
-    "If you already paid or shared documents, contact your bank and SAPS.",
+    "If you already paid or shared documents, see 'If you think you have been scammed' below.",
 ]
 ADVICE_MEDIUM = [
     "Pause before sharing any documents or money.",
@@ -117,28 +120,20 @@ TYPING_PASSAGES = [
 TYPING_TEST_SECONDS = 30
 
 
-# ---------- Small building blocks used by every screen ----------
-def make_card(content, border_color="#D9E2E5"):
-    """A white box with a thin border."""
-    return ft.Container(
-        content=content,
-        bgcolor=WHITE,
-        padding=16,
-        border_radius=10,
-        border=ft.Border.all(1, border_color),
-    )
+def get_visitor_id(page):
+    """A label for this visitor's session, used only for the rate limit (never stored on disk)."""
+    try:
+        return str(page.session.id)
+    except Exception:
+        return "unknown"
 
 
-def make_heading(text):
-    return ft.Text(text, size=24, weight=ft.FontWeight.BOLD, color=INK)
-
-
-def make_section_title(text):
-    return ft.Text(text, size=18, weight=ft.FontWeight.W_600, color=TEAL)
-
-
-def make_text(text, color=INK, size=15):
-    return ft.Text(text, size=size, color=color)
+def make_bullet_card(title, items):
+    """A card with a title and a list of bullet points."""
+    lines = [ft.Text(title, size=18, weight=ft.FontWeight.W_600, color=INK)]
+    for item in items:
+        lines.append(make_text("\u2022 " + item))
+    return make_card(ft.Column(lines, spacing=8))
 
 
 # ---------- Screen 1: Home ----------
@@ -163,25 +158,92 @@ def home_view(page, go_to_screen):
         )
         return ft.Container(content=make_card(row), on_click=on_tile_click)
 
-    return [
+    privacy_lines = [
+        "SafeStart SA has no accounts and does not save what you type or paste.",
+        "When you press 'Verify link and company', our server opens the link you entered to look at it. Nothing about it is stored by the app.",
+        "The company that hosts the server may keep normal technical records, like any website.",
+        "Results are warning signs, not proof. The app gives general information, not legal advice.",
+    ]
+    privacy_content = ft.Container(
+        content=ft.Column([make_text("\u2022 " + line, INK, 14) for line in privacy_lines], spacing=6),
+        padding=ft.Padding.only(left=16, right=16, bottom=12),
+    )
+
+    screen = [
         ft.Text("SafeStart SA", size=30, weight=ft.FontWeight.BOLD, color=TEAL),
         make_text("Free tools to spot fake job offers, know your rights and feel ready for work.", MUTED),
         make_tile(ft.Icons.SHIELD_OUTLINED, "Check a job offer", "Paste an ad and see how risky it looks.", 1),
         make_tile(ft.Icons.GAVEL_OUTLINED, "Know your rights", "Plain-language lessons before your first job.", 2),
-        make_tile(ft.Icons.KEYBOARD_OUTLINED, "Build your skills", "Email writing tips and a typing test.", 3),
-        make_text("SafeStart SA gives general information, not legal advice.", MUTED, 12),
+        make_tile(ft.Icons.CALCULATE_OUTLINED, "Tools", "Check your payslip and contract, and take the rights quiz.", 3),
+        make_tile(ft.Icons.KEYBOARD_OUTLINED, "Build your skills", "Emails, typing, CV and interview practice.", 4),
+        make_card(ft.ExpansionTile(
+            title=ft.Text("Privacy and limits", weight=ft.FontWeight.W_600, color=INK),
+            controls=[privacy_content],
+        )),
     ]
+
+    if settings.FEEDBACK_URL != "":
+        async def open_feedback(e):
+            await ft.UrlLauncher().launch_url(settings.FEEDBACK_URL)
+        screen.append(ft.TextButton(content="Send feedback or report a problem",
+                                    icon=ft.Icons.FEEDBACK_OUTLINED, on_click=open_feedback))
+    return screen
 
 
 # ---------- Screen 2: Scam checker ----------
+def make_scam_examples():
+    tiles = []
+    for example in scam_content.SCAM_EXAMPLES:
+        flag_lines = []
+        for flag in example["flags"]:
+            flag_lines.append(make_text("\u2022 " + flag, INK, 14))
+        content = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Text(example["example"], italic=True, color=INK, size=14),
+                    ft.Text("Warning signs:", weight=ft.FontWeight.BOLD, size=14, color=INK),
+                    *flag_lines,
+                    make_text(example["lesson"], TEAL, 14),
+                ],
+                spacing=6,
+            ),
+            padding=ft.Padding.only(left=16, right=16, bottom=14),
+        )
+        tiles.append(ft.ExpansionTile(title=ft.Text(example["title"], weight=ft.FontWeight.W_600, color=INK),
+                                      controls=[content]))
+    intro = make_text("These examples were written to teach. They are not real adverts.", MUTED, 13)
+    return make_card(ft.Column([intro, ft.Column(tiles, spacing=0)], spacing=8))
+
+
+def make_report_steps():
+    steps = []
+    number = 1
+    for title, text in scam_content.REPORT_STEPS:
+        steps.append(ft.Column(
+            [ft.Text(f"{number}. {title}", weight=ft.FontWeight.W_600, color=INK), make_text(text, INK, 14)],
+            spacing=2,
+        ))
+        number = number + 1
+    steps.append(make_text("Check contact details on official websites before you rely on them.", MUTED, 12))
+    return make_card(ft.Column(steps, spacing=12))
+
+
+def make_real_job_sources():
+    rows = []
+    for name, description, web_address in scam_content.REAL_JOB_SOURCES:
+        rows.append(make_help_row(name, description, web_address))
+    rows.append(make_text(scam_content.REAL_JOB_NOTE, MUTED, 13))
+    return make_card(ft.Column(rows, spacing=4))
+
+
 def scam_view(page, go_to_screen):
     # The input boxes
     ad_box = ft.TextField(label="Paste the job ad, email or WhatsApp message",
-                          multiline=True, min_lines=4, max_lines=8)
-    link_box = ft.TextField(label="Link to the job (optional)", hint_text="https://...")
+                          multiline=True, min_lines=4, max_lines=8, max_length=MAX_AD_CHARS)
+    link_box = ft.TextField(label="Link to the job (optional)", hint_text="https://...", max_length=MAX_LINK_CHARS)
     company_box = ft.TextField(label="Company's official website (optional)",
-                               hint_text="Type it yourself, don't copy it from the ad")
-    title_box = ft.TextField(label="Job title (optional)", hint_text="e.g. Junior Accountant")
+                               hint_text="Type it yourself, don't copy it from the ad", max_length=300)
+    title_box = ft.TextField(label="Job title (optional)", hint_text="e.g. Junior Accountant", max_length=100)
 
     # One checkbox for every red flag. We keep them in a dictionary: key -> checkbox
     checkboxes = {}
@@ -192,12 +254,12 @@ def scam_view(page, go_to_screen):
     online_results_area = ft.Column(spacing=8)
     final_result_area = ft.Column()
 
-    # This remembers the score from the online check between button presses
-    memory = {"online_score": 0, "online_check_done": False}
+    # This remembers things between button presses
+    memory = {"online_score": 0, "online_check_done": False, "online_warnings": []}
 
     def scan_the_ad(e):
         """Look for red flags in the pasted text and tick the matching boxes."""
-        ad_text = (ad_box.value or "").lower()
+        ad_text = (ad_box.value or "")[:MAX_AD_CHARS].lower()
         found_count = 0
         for flag in FLAGS:
             if flag["pattern"] is not None and re.search(flag["pattern"], ad_text):
@@ -205,10 +267,10 @@ def scam_view(page, go_to_screen):
                 found_count = found_count + 1
 
         # Copy the first link from the ad into the link box
-        links_in_ad = verifier.find_urls(ad_box.value or "")
+        links_in_ad = verifier.find_urls(ad_text)
         link_was_copied = len(links_in_ad) > 0 and (link_box.value or "").strip() == ""
         if link_was_copied:
-            link_box.value = links_in_ad[0]
+            link_box.value = links_in_ad[0][:MAX_LINK_CHARS]
 
         if found_count > 0:
             message = f"Scan found {found_count} possible warning sign(s) and ticked them. "
@@ -239,6 +301,13 @@ def scam_view(page, go_to_screen):
             page.update()
             return
 
+        # Stop people (or programs) from running too many checks
+        allowed, limit_message = ratelimit.check_and_record(get_visitor_id(page))
+        if not allowed:
+            online_results_area.controls = [make_text(limit_message, AMBER, 14)]
+            page.update()
+            return
+
         # Show a spinner while we wait
         spinner = ft.ProgressRing(width=20, height=20, stroke_width=3)
         online_results_area.controls = [
@@ -258,11 +327,14 @@ def scam_view(page, go_to_screen):
             checkboxes[key].value = True
         memory["online_score"] = result["score"]
         memory["online_check_done"] = True
+        memory["online_warnings"] = []
 
         # Show every finding with its icon
         rows = [ft.Text("Online check", size=17, weight=ft.FontWeight.W_600, color=INK)]
         for finding in result["findings"]:
             icon, color = FINDING_STYLES[finding["level"]]
+            if finding["level"] in ("bad", "warn"):
+                memory["online_warnings"].append(finding["text"])
             rows.append(ft.Row(
                 [ft.Icon(icon, color=color, size=20), ft.Text(finding["text"], size=14, color=INK, expand=True)],
                 vertical_alignment=ft.CrossAxisAlignment.START,
@@ -275,6 +347,18 @@ def scam_view(page, go_to_screen):
 
     async def open_cipc(e):
         await ft.UrlLauncher().launch_url("https://www.cipc.co.za")
+
+    def build_share_message(title):
+        """Write a short warning the user can send to friends."""
+        lines = [f"SafeStart SA job check: {title}"]
+        for flag in FLAGS:
+            if checkboxes[flag["key"]].value:
+                lines.append("- " + flag["text"])
+        for warning in memory["online_warnings"][:4]:
+            lines.append("- " + warning)
+        lines.append("Never pay to get a job, and never share ID, bank details or OTPs. "
+                     "Check any job on the company's own website first.")
+        return "\n".join(lines)
 
     def show_result(e):
         """Add up the points from the ticked boxes and the online check."""
@@ -292,6 +376,17 @@ def scam_view(page, go_to_screen):
         else:
             title, color, tips = "Low risk, but stay alert", GREEN, ADVICE_LOW
 
+        share_message = build_share_message(title)
+        copied_note = ft.Text("", size=13, color=GREEN)
+
+        async def copy_warning(e):
+            await ft.Clipboard().set(share_message)
+            copied_note.value = "Copied. You can paste it into a chat."
+            page.update()
+
+        async def share_on_whatsapp(e):
+            await ft.UrlLauncher().launch_url("https://wa.me/?text=" + quote(share_message))
+
         lines = [ft.Text(title, size=20, weight=ft.FontWeight.BOLD, color=color)]
         for tip in tips:
             lines.append(make_text("\u2022 " + tip))
@@ -299,6 +394,11 @@ def scam_view(page, go_to_screen):
             lines.append(make_text("You have not run the online check yet. Add the job link or the "
                                    "company website for a better result.", MUTED, 13))
         lines.append(ft.Button(content="Check company on CIPC", icon=ft.Icons.OPEN_IN_NEW, on_click=open_cipc))
+        lines.append(ft.Row([
+            ft.OutlinedButton(content="Copy warning", icon=ft.Icons.CONTENT_COPY, on_click=copy_warning),
+            ft.OutlinedButton(content="Share on WhatsApp", icon=ft.Icons.SHARE, on_click=share_on_whatsapp),
+        ], wrap=True))
+        lines.append(copied_note)
 
         final_result_area.controls = [make_card(ft.Column(lines, spacing=8), border_color=color)]
         page.update()
@@ -310,6 +410,7 @@ def scam_view(page, go_to_screen):
             checkboxes[key].value = False
         memory["online_score"] = 0
         memory["online_check_done"] = False
+        memory["online_warnings"] = []
         online_results_area.controls = []
         final_result_area.controls = []
         page.update()
@@ -337,6 +438,14 @@ def scam_view(page, go_to_screen):
         ft.TextButton(content="Start over", on_click=start_over),
     ]))
     screen.append(final_result_area)
+
+    # Learning sections below the checker
+    screen.append(make_section_title("Common scams: what to look for"))
+    screen.append(make_scam_examples())
+    screen.append(make_section_title("If you think you have been scammed"))
+    screen.append(make_report_steps())
+    screen.append(make_section_title("Where to look for real opportunities"))
+    screen.append(make_real_job_sources())
     return screen
 
 
@@ -373,8 +482,10 @@ def make_lesson(lesson):
 
 def make_pay_checker(page):
     """The 'Is my pay legal?' calculator."""
-    pay_box = ft.TextField(label="Your pay per month (R, before deductions)", keyboard_type=ft.KeyboardType.NUMBER)
-    hours_box = ft.TextField(label="Ordinary hours you work per week", keyboard_type=ft.KeyboardType.NUMBER, value="45")
+    pay_box = ft.TextField(label="Your pay per month (R, before deductions)",
+                           keyboard_type=ft.KeyboardType.NUMBER, max_length=12)
+    hours_box = ft.TextField(label="Ordinary hours you work per week",
+                             keyboard_type=ft.KeyboardType.NUMBER, value="45", max_length=5)
     answer_area = ft.Column(spacing=6)
 
     def check_pay(e):
@@ -424,23 +535,16 @@ def make_pay_checker(page):
     ))
 
 
-def make_help_row(name, description, web_address):
-    """A tappable row that opens a website."""
-    async def open_website(e):
-        await ft.UrlLauncher().launch_url(web_address)
-
-    return ft.ListTile(
-        title=ft.Text(name, weight=ft.FontWeight.W_600, color=INK),
-        subtitle=ft.Text(description, color=MUTED),
-        trailing=ft.Icon(ft.Icons.OPEN_IN_NEW, color=TEAL),
-        on_click=open_website,
-    )
-
-
 def rights_view(page, go_to_screen):
+    if settings.CONTENT_REVIEWED_BY != "":
+        review_note = f"Content reviewed by: {settings.CONTENT_REVIEWED_BY}."
+    else:
+        review_note = "This content has not yet been reviewed by a labour law professional."
+
     screen = [
         make_heading("Know your rights"),
         make_text("Plain-language guide to South African labour law for first-time workers.", MUTED),
+        make_text(f"Last updated {rights_content.CONTENT_UPDATED}. {review_note}", MUTED, 13),
         make_pay_checker(page),
     ]
 
@@ -478,14 +582,17 @@ def rights_view(page, go_to_screen):
     screen.append(make_section_title("Before you sign"))
     screen.append(make_card(ft.Column(checklist, spacing=2)))
 
+    # Sources
+    screen.append(make_section_title("Sources"))
+    screen.append(make_bullet_card("Where this information comes from", rights_content.SOURCES))
+
     screen.append(make_text(
-        f"Last updated {rights_content.CONTENT_UPDATED}. This is general information, not legal advice. "
-        "Laws and amounts change, so confirm the latest details with the Department of Employment "
-        "and Labour or the CCMA.", MUTED, 12))
+        "This is general information, not legal advice. Laws and amounts change, so confirm "
+        "the latest details with the Department of Employment and Labour or the CCMA.", MUTED, 12))
     return screen
 
 
-# ---------- Screen 4: Skills ----------
+# ---------- Screen 5: Skills ----------
 def skills_view(page, go_to_screen):
     # --- Email tips card ---
     email_lines = [ft.Text("Writing a professional email", size=18, weight=ft.FontWeight.W_600, color=INK)]
@@ -552,16 +659,33 @@ def skills_view(page, go_to_screen):
         timer_text, passage_text, typing_box, start_button, result_text,
     ]
 
+    # --- Interview answers ---
+    answer_tiles = []
+    for question, advice in skills_content.SAMPLE_ANSWERS:
+        answer_tiles.append(ft.ExpansionTile(
+            title=ft.Text(question, weight=ft.FontWeight.W_600, color=INK),
+            controls=[ft.Container(content=make_text(advice, INK, 14),
+                                   padding=ft.Padding.only(left=16, right=16, bottom=12))],
+        ))
+    interview_lines = [
+        ft.Text("Interview practice", size=18, weight=ft.FontWeight.W_600, color=INK),
+        make_text("Common questions and how to approach them:", MUTED, 14),
+        ft.Column(answer_tiles, spacing=0),
+    ]
+
     return [
         make_heading("Build your skills"),
         make_card(ft.Column(email_lines, spacing=8)),
         make_card(ft.Column(typing_lines, spacing=10)),
+        make_bullet_card("Writing a CV that gets noticed", skills_content.CV_TIPS),
+        make_bullet_card("Interview checklist", skills_content.INTERVIEW_CHECKLIST),
+        make_card(ft.Column(interview_lines, spacing=8)),
     ]
 
 
 # ---------- The app itself ----------
-# The four screens, in the same order as the buttons at the bottom
-SCREENS = [home_view, scam_view, rights_view, skills_view]
+# The five screens, in the same order as the buttons at the bottom
+SCREENS = [home_view, scam_view, rights_view, tools_view, skills_view]
 
 
 def main(page: ft.Page):
@@ -594,6 +718,7 @@ def main(page: ft.Page):
             ft.NavigationBarDestination(icon=ft.Icons.HOME_OUTLINED, label="Home"),
             ft.NavigationBarDestination(icon=ft.Icons.SHIELD_OUTLINED, label="Scam check"),
             ft.NavigationBarDestination(icon=ft.Icons.GAVEL_OUTLINED, label="Rights"),
+            ft.NavigationBarDestination(icon=ft.Icons.CALCULATE_OUTLINED, label="Tools"),
             ft.NavigationBarDestination(icon=ft.Icons.KEYBOARD_OUTLINED, label="Skills"),
         ],
     )
