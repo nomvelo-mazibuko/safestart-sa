@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Build output and secrets (never upload these)
+dist/
+.env
+
+# Editor and system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
