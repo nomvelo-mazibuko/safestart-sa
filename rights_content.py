@@ -1,7 +1,6 @@
 """Content for the Know Your Rights screen.
 
 To update the app when a law or amount changes, edit this file only.
-A point is either plain text, or a (bold lead-in, rest of sentence) pair.
 General information only, not legal advice. Check labour.gov.za and ccma.org.za for the latest.
 """
 

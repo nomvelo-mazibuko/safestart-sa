@@ -5,11 +5,11 @@ and the counters reset when the server restarts.
 """
 import time
 
-WINDOW_SECONDS = 600     # look at the last 10 minutes
-PER_VISITOR_MAX = 5      # checks one visitor may run in that time
-EVERYONE_MAX = 60        # checks the whole server will run in that time
+WINDOW_SECONDS = 600     
+PER_VISITOR_MAX = 5      
+EVERYONE_MAX = 60        
 
-_history = {}  # name -> list of times (in seconds) when a check was run
+_history = {}  
 
 
 def _recent_calls(name, now):
@@ -34,7 +34,6 @@ def check_and_record(visitor_id):
     mine.append(now)
     everyone.append(now)
 
-    # Tidy up: forget visitors who have not checked anything recently
     if len(_history) > 2000:
         for name in list(_history):
             if len(_history[name]) == 0:

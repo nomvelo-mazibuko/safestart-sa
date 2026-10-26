@@ -1,5 +1,3 @@
-"""Text for the extra skills sections (CV and interviews)."""
-
 CV_TIPS = [
     "Keep it to one or two pages with clear headings: contact details, profile, education, skills, experience.",
     "Use a professional email address and a phone number you answer.",

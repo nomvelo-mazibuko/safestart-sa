@@ -27,4 +27,4 @@ QUESTIONS = [
      "options": ["Share them privately", "Share only the OTP", "Never share them", "Share them if they are polite"], "answer": 2,
      "why": "A real employer never needs your PIN or OTP. You only give banking account details, never these codes."},
 ]
-PASS_MARK = 6  # correct answers needed for the badge
+PASS_MARK = 6  

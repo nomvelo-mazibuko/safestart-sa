@@ -40,7 +40,6 @@ SCAM_EXAMPLES = [
     },
 ]
 
-# What to do if you think you have been scammed. Confirm contact details before relying on them.
 REPORT_STEPS = [
     ("Stop and keep proof", "Stop replying. Do not pay or send anything more. Take screenshots of the ad and messages, and save the links, phone numbers and any proof of payment."),
     ("Call your bank if you paid or shared banking details", "Phone your bank straight away, using the number on the back of your card or in the official banking app, not a number from the message. Ask them to stop payments and secure your account. Never share an OTP or PIN."),
@@ -50,7 +49,6 @@ REPORT_STEPS = [
     ("Warn others", "Share a warning with friends and family so they do not fall for the same trick."),
 ]
 
-# Places to look for real opportunities. Always check an opportunity before you share documents.
 REAL_JOB_SOURCES = [
     ("SAYouth.mobi", "Free support and opportunities for young job seekers.", "https://sayouth.mobi"),
     ("Public Service vacancies (DPSA)", "Government posts are advertised through the Department of Public Service and Administration.", "https://www.dpsa.gov.za"),

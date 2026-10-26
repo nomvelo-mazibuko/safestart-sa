@@ -1,16 +1,3 @@
-"""SafeStart SA - a free work-readiness app for South African youth.
-
-Screens
-  1. Home          - big buttons, privacy note and feedback
-  2. Scam checker  - paste an ad, check the link, tick red flags, get a risk rating,
-                     share a warning, see scam examples and what to do if scammed
-  3. Rights        - labour law lessons (the text lives in rights_content.py) + pay calculator
-  4. Tools         - payslip checker, contract checker and rights quiz (see tools.py)
-  5. Skills        - email tips, typing test, CV tips and interview practice
-
-Run on your computer:   python main.py          (or: flet run main.py)
-Run in the browser:     flet run --web main.py
-"""
 import asyncio
 import os
 import random
@@ -34,8 +21,6 @@ MAX_AD_CHARS = 5000
 MAX_LINK_CHARS = 2000
 
 # ---------- Scam checker data ----------
-# Each red flag has: a key, the question shown to the user, how many risk points
-# it is worth, and an optional pattern used to spot it automatically in text.
 FLAGS = [
     {"key": "pay", "weight": 40,
      "text": "They asked me to pay for something (application, training, uniform, deposit)",
@@ -81,7 +66,6 @@ ADVICE_LOW = [
     "A real employer never needs your PIN or OTP.",
 ]
 
-# Icon and colour for each kind of finding from verifier.py
 FINDING_STYLES = {
     "good": (ft.Icons.CHECK_CIRCLE, GREEN),
     "warn": (ft.Icons.WARNING_AMBER_ROUNDED, AMBER),
@@ -245,16 +229,13 @@ def scam_view(page, go_to_screen):
                                hint_text="Type it yourself, don't copy it from the ad", max_length=300)
     title_box = ft.TextField(label="Job title (optional)", hint_text="e.g. Junior Accountant", max_length=100)
 
-    # One checkbox for every red flag. We keep them in a dictionary: key -> checkbox
     checkboxes = {}
     for flag in FLAGS:
         checkboxes[flag["key"]] = ft.Checkbox(label=flag["text"])
 
-    # Areas of the screen that we fill in later
     online_results_area = ft.Column(spacing=8)
     final_result_area = ft.Column()
 
-    # This remembers things between button presses
     memory = {"online_score": 0, "online_check_done": False, "online_warnings": []}
 
     def scan_the_ad(e):
@@ -266,7 +247,6 @@ def scam_view(page, go_to_screen):
                 checkboxes[flag["key"]].value = True
                 found_count = found_count + 1
 
-        # Copy the first link from the ad into the link box
         links_in_ad = verifier.find_urls(ad_text)
         link_was_copied = len(links_in_ad) > 0 and (link_box.value or "").strip() == ""
         if link_was_copied:
@@ -285,8 +265,7 @@ def scam_view(page, go_to_screen):
 
     async def verify_online(e):
         """Open the link and the company website (this can take a few seconds)."""
-        # On GitHub Pages the app runs inside the browser, which is not allowed to
-        # open other websites, so the online check cannot work there.
+
         if sys.platform == "emscripten":
             online_results_area.controls = [make_text(
                 "The online link check needs the server version of SafeStart SA. "
@@ -301,35 +280,30 @@ def scam_view(page, go_to_screen):
             page.update()
             return
 
-        # Stop people (or programs) from running too many checks
         allowed, limit_message = ratelimit.check_and_record(get_visitor_id(page))
         if not allowed:
             online_results_area.controls = [make_text(limit_message, AMBER, 14)]
             page.update()
             return
 
-        # Show a spinner while we wait
         spinner = ft.ProgressRing(width=20, height=20, stroke_width=3)
         online_results_area.controls = [
             ft.Row([spinner, make_text("Checking the link and the company website...", MUTED, 14)])
         ]
         page.update()
 
-        # Run the slow check in the background so the app does not freeze
         patterns = {}
         for flag in FLAGS:
             if flag["pattern"] is not None:
                 patterns[flag["key"]] = flag["pattern"]
         result = await asyncio.to_thread(verifier.verify, job_link, company_site, title_box.value or "", patterns)
 
-        # Tick the boxes for red flags found on the page
         for key in result["matches"]:
             checkboxes[key].value = True
         memory["online_score"] = result["score"]
         memory["online_check_done"] = True
         memory["online_warnings"] = []
 
-        # Show every finding with its icon
         rows = [ft.Text("Online check", size=17, weight=ft.FontWeight.W_600, color=INK)]
         for finding in result["findings"]:
             icon, color = FINDING_STYLES[finding["level"]]
@@ -415,7 +389,6 @@ def scam_view(page, go_to_screen):
         final_result_area.controls = []
         page.update()
 
-    # Put the screen together, top to bottom
     screen = [
         make_heading("Job scam checker"),
         make_text("Paste the message, check the link against the company's real website, and get a risk rating.", MUTED),
@@ -439,7 +412,6 @@ def scam_view(page, go_to_screen):
     ]))
     screen.append(final_result_area)
 
-    # Learning sections below the checker
     screen.append(make_section_title("Common scams: what to look for"))
     screen.append(make_scam_examples())
     screen.append(make_section_title("If you think you have been scammed"))
@@ -548,7 +520,6 @@ def rights_view(page, go_to_screen):
         make_pay_checker(page),
     ]
 
-    # The lessons, grouped by topic
     for group_name, lessons in rights_content.GROUPS:
         lesson_tiles = []
         for lesson in lessons:
@@ -556,7 +527,6 @@ def rights_view(page, go_to_screen):
         screen.append(make_section_title(group_name))
         screen.append(make_card(ft.Column(lesson_tiles, spacing=0)))
 
-    # What to do if something goes wrong
     steps = []
     number = 1
     for step_title, step_text in rights_content.IF_WRONG_STEPS:
@@ -568,14 +538,12 @@ def rights_view(page, go_to_screen):
     screen.append(make_section_title("If something goes wrong"))
     screen.append(make_card(ft.Column(steps, spacing=12)))
 
-    # Links to free help
     help_rows = []
     for name, description, web_address in rights_content.HELP_LINKS:
         help_rows.append(make_help_row(name, description, web_address))
     screen.append(make_section_title("Where to get free help"))
     screen.append(make_card(ft.Column(help_rows, spacing=0)))
 
-    # Checklist
     checklist = []
     for item in rights_content.BEFORE_YOU_SIGN:
         checklist.append(ft.Checkbox(label=item))
@@ -622,13 +590,11 @@ def skills_view(page, go_to_screen):
         await typing_box.focus()
 
         try:
-            # Count down one second at a time
             for seconds_left in range(TYPING_TEST_SECONDS, 0, -1):
                 timer_text.value = f"{seconds_left}s"
                 timer_text.update()
                 await asyncio.sleep(1)
 
-            # Time is up: compare what was typed with the passage, word by word
             typed_words = (typing_box.value or "").split()
             passage_words = passage.split()
             correct_words = 0
@@ -649,7 +615,7 @@ def skills_view(page, go_to_screen):
             result_text.value = f"{words_per_minute} words per minute, {accuracy}% accuracy"
             page.update()
         except Exception:
-            return  # the person left this screen in the middle of the test
+            return  
 
     start_button.on_click = run_typing_test
 
@@ -684,7 +650,6 @@ def skills_view(page, go_to_screen):
 
 
 # ---------- The app itself ----------
-# The five screens, in the same order as the buttons at the bottom
 SCREENS = [home_view, scam_view, rights_view, tools_view, skills_view]
 
 
@@ -728,7 +693,7 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
-    port = os.getenv("PORT")  # hosting services set PORT for us
+    port = os.getenv("PORT")  
     if port:
         ft.run(main, view=ft.AppView.WEB_BROWSER, host="0.0.0.0", port=int(port))
     else:

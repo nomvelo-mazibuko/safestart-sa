@@ -8,7 +8,7 @@ MUTED = "#5B6B71"
 BACKGROUND = "#F2F6F7"
 WHITE = "#FFFFFF"
 RED = "#B3261E"
-AMBER = "#8A5200"   # darker than before so it is easier to read on white
+AMBER = "#8A5200" 
 GREEN = "#2E7D32"
 
 

@@ -180,7 +180,6 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-# ProxyHandler({}) means "do not use a proxy", so our safety checks cannot be bypassed.
 opener = build_opener(ProxyHandler({}), NoRedirect, SafeHTTPHandler, SafeHTTPSHandler)
 
 

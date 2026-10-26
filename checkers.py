@@ -1,10 +1,5 @@
-"""Plain functions for the contract checker and the payslip checker.
-They return results as data, and the Tools screen shows them.
-"""
 import re
 
-# ---------- Contract checker ----------
-# (name of the term, pattern that suggests it is mentioned)
 CONTRACT_TERMS = [
     ("Job title or duties", r"job title|position|duties|job description|\brole\b"),
     ("Pay (salary or hourly rate)", r"salary|remuneration|wage|rate of pay|per month|per hour"),
@@ -18,7 +13,6 @@ CONTRACT_TERMS = [
     ("UIF", r"\buif\b|unemployment insurance"),
 ]
 
-# (pattern, warning message)
 CONTRACT_WARNINGS = [
     (r"non-?refundable|\bdeposit\b|pay.{0,25}\bfee\b",
      "The contract mentions you paying money. Ask exactly what for, and why."),

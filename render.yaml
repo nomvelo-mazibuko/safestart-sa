@@ -1,11 +1,10 @@
-# Tells Render how to build and run SafeStart SA ("Blueprint").
-# Optional: you can also type these same settings into the Render website.
+
 services:
   - type: web
     name: safestart-sa
     runtime: python
     plan: free
-    region: frankfurt          # closest Render region to South Africa (check the list)
+    region: frankfurt          # closest Render region to South Africa
     buildCommand: pip install -r requirements-server.txt
     startCommand: python main.py
     envVars:

@@ -32,7 +32,7 @@ def read_amount(text):
     cleaned = (text or "").replace("R", "").replace(" ", "").replace(",", ".").strip()
     if cleaned == "":
         return 0.0
-    return float(cleaned)  # raises ValueError if it is not a number
+    return float(cleaned) 
 
 
 # ---------- Payslip checker ----------
@@ -115,7 +115,7 @@ def make_contract_checker(page):
 
 # ---------- Rights quiz ----------
 def make_quiz(page):
-    groups = []  # one RadioGroup per question
+    groups = []  
     question_blocks = []
     number = 1
     for question in quiz_content.QUESTIONS:
